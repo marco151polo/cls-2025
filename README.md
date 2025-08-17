@@ -1,4 +1,4 @@
-This isn't perfect yet, but it finally shows the majority of the latest 2023, 2024, and 2025 Google Timeline / Location History data format on a map with a rough data export ability from user selected boxed areas. It is also backwards compatible with the original Googel Timeline / Location History format as well.
+This isn't perfect yet, but it finally shows the majority of the latest 2023, 2024, and 2025 Google Timeline / Location History data format on a map with a rough data export ability from user specified boxed areas. It is also backwards compatible with the original Googel Timeline / Location History format as well.
 
 This is continued from the good work and team from hack4impact.
 
