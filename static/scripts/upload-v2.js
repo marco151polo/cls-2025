@@ -93,7 +93,7 @@ function parseFile(file, oboeInstance) {
             // fallback parse if stream caught nothing
             try {
               if (!totalPoints && backupBuffer && backupBuffer.trim().length) {
-                console.warn("⚠️ No streamed points. Falling back to full JSON parse.");
+                console.warn("No streamed points. Falling back to full JSON parse.");
                 var root = JSON.parse(backupBuffer);
                 totalPoints += handleParsedData(root, lv) || 0;
                 lv.ProcessView();
