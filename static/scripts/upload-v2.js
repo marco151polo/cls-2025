@@ -10,16 +10,32 @@ $(document).on('change', ':file', function() {
     input.trigger('fileselect', [numFiles, label]);
 });
 
-var SCALAR_E7 = 0.0000001;
-// Init oboe for file processing
-var os = oboe()
-os.node('locations.*', function(location) {
-    var marker = new PruneCluster.Marker(location.latitudeE7 * SCALAR_E7,
-    location.longitudeE7 * SCALAR_E7);
-    marker.data.timestamp = location.timestampMs ? location.timestampMs : +new Date(location.timestamp);
-    lv.RegisterMarker(marker);
+// Init oboe for streaming parse (cover all known shapes)
+// Init oboe streaming parse (supports all known formats)
+var totalPoints = 0;
+var ob = oboe()
+  .node('semanticSegments.*', function (seg) {
+    try { totalPoints += handleParsedData({ semanticSegments: [seg] }, lv) || 0; }
+    catch (e) { console.error("Error parsing semanticSegment:", e, seg); }
     return oboe.drop;
-}).done('done');
+  })
+  .node('locations.*', function (loc) {
+    try { totalPoints += handleParsedData({ locations: [loc] }, lv) || 0; }
+    catch (e) { console.error("Error parsing location:", e, loc); }
+    return oboe.drop;
+  })
+  .node('timelineObjects.*', function (obj) {
+    try { totalPoints += handleParsedData({ timelineObjects: [obj] }, lv) || 0; }
+    catch (e) { console.error("Error parsing timelineObject:", e, obj); }
+    return oboe.drop;
+  })
+  .done(function () {
+    console.log("Oboe stream done. Points so far:", totalPoints);
+    lv.ProcessView(); // force redraw
+  })
+  .fail(function (err) {
+    console.error("Oboe parse error:", err);
+  });
 
 // initialize file parsing
 $(':file').on('fileselect', function(event, numFiles, label) {
@@ -30,7 +46,7 @@ $(':file').on('fileselect', function(event, numFiles, label) {
         input.val(log);
         var file = $('#uploadInput').get(0).files[0];
         count = 0;
-        parseFile(file, os);
+        parseFile(file, ob);
         // initUpload(file);
     } else {
         if (log) alert(log);
@@ -50,25 +66,40 @@ function parseFile(file, oboeInstance) {
     var chunkReaderBlock = null;
     var startTime = Date.now();
     var endTime = Date.now();
+	var backupBuffer = ""; // fallback if streaming misses anything
+	var lastChunkBytes = 0; // size of the most recent Blob slice in BYTES
     var readEventHandler = function(evt) {
         if (evt.target.error == null) {
-            offset += evt.target.result.length;
+            // IMPORTANT: advance by BYTES, not characters
+            offset = Math.min(offset + lastChunkBytes, fileSize); // use bytes not chars
             var progress = (100 * offset / fileSize).toFixed(2);
             var trimmed = (100 * offset / fileSize).toFixed(0);
             $("#done").css('width', trimmed + '%').attr('aria-valuenow', trimmed).text(progress + '%')
             var chunk = evt.target.result;
-            oboeInstance.emit('data', chunk); // callback for handling read chunk
+            backupBuffer += chunk;
+            oboeInstance.emit('data', chunk); // stream to oboe
         } else {
             console.log("Read error: " + evt.target.error);
             return;
         }
         if (offset >= fileSize) {
-            os.emit('done');
+			// finish the oboe stream
+             ob.emit('done');
             console.log("Done reading file");
             $('#step-2').fadeIn(1000);
             endTime = Date.now();
-            $("#stats").text("Time taken: " + ((endTime - startTime) / 1000).toFixed(2) + "s for file size " + (fileSize / (1024 * 1024)).toFixed(2) + " MB")
-            lv.ProcessView()
+            $("#stats").text(((endTime - startTime) / 1000).toFixed(2) + " seconds");
+            // Fallback: if streaming caught nothing (e.g., unexpected structure),
+            // fallback parse if stream caught nothing
+            try {
+              if (!totalPoints && backupBuffer && backupBuffer.trim().length) {
+                console.warn("⚠️ No streamed points. Falling back to full JSON parse.");
+                var root = JSON.parse(backupBuffer);
+                totalPoints += handleParsedData(root, lv) || 0;
+                lv.ProcessView();
+                console.log("Fallback points added:", totalPoints);
+              }
+            } catch (e) { console.error("Fallback parse failed:", e); }
             return;
         }
 
@@ -78,11 +109,15 @@ function parseFile(file, oboeInstance) {
 
     chunkReaderBlock = function(_offset, length, _file) {
         var r = new FileReader();
-        var blob = _file.slice(_offset, length + _offset);
+        // Make sure we never request beyond fileSize
+        var end = Math.min(_offset + length, _file.size);
+        var blob = _file.slice(_offset, end);
+        lastChunkBytes = blob.size;
         r.onload = readEventHandler;
-        r.readAsText(blob);
+        r.readAsText(blob, "utf-8");
     }
 
     // now let's start the read with the first block
     chunkReaderBlock(offset, chunkSize, file);
 } 
+parseFile(file, ob);
